@@ -4,15 +4,15 @@
 
 Install python and VLC player <https://www.videolan.org/vlc/>
 
-This project uses python venv.
+This project uses `python3` and `venv`.
 
-Create virtual environment
+**Create virtual environment**
 
 ``` sh
 python -m venv .venv
 ```
 
-Activate environment
+**Activate environment**
 
 ``` sh
 source .venv/bin/activate
@@ -26,15 +26,11 @@ pip install -r requirements.txt
 
 
 ## Usage
-Run VLC with the HTTP interface
-
-``` sh
-vlc --extraintf http --http-port 3000 --http-password cit
-```
+Was developped and tested on Windows subsystem for Linux (WSL).
 
 Run the script
 
 ``` sh
-python main.py video1.mp4 video2.mp4
+python main.py logfile.txt video1.mp4 video2.mp4
 ```
 

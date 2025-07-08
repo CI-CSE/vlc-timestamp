@@ -5,8 +5,6 @@ import sys
 import re
 import json
 import threading
-import termios
-import tty
 
 
 class VLCController:
@@ -134,7 +132,7 @@ class VLCController:
         line_cursor += 1
 
         for idx, comment in enumerate(self.components):
-            description, color = self.components[comment]
+            _, color = self.components[comment]
             curses.init_pair(idx + 1, color, curses.COLOR_BLACK)
             stdscr.addstr(
                 line_cursor, 0, f"{line_cursor}. {comment}", curses.color_pair(idx + 1)
