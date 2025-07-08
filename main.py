@@ -49,15 +49,17 @@ class VLCController:
         }
 
     def getch(self):
-        """Get a single character from stdin without pressing Enter"""
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(sys.stdin.fileno())
-            ch = sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        return ch
+        """Get a single character using curses"""
+
+        def _getch(stdscr):
+            stdscr.nodelay(True)  # Non-blocking mode
+            curses.curs_set(0)  # Hide cursor
+            key = stdscr.getch()
+            if key == -1:  # No key pressed
+                return None
+            return chr(key) if 32 <= key <= 126 else chr(key).lower()
+
+        return curses.wrapper(_getch)
 
     def start_vlc(self):
         # Start VLC process with RC interface and GUI
@@ -149,6 +151,7 @@ class VLCController:
         self.write_category_help(line_cursor + 5, stdscr)
         result = None
         selected_comments = set()
+        stdscr.refresh()
         while True:
             key = stdscr.getch()
             if key in range(ord("1"), ord("1") + len(self.components)):
@@ -174,16 +177,7 @@ class VLCController:
         return result
 
     def listen_for_input(self, file_name):
-        key_hint = "Press" + " --- ".join(
-            [
-                "'c' to log prompt Components and Categories",  # implemented
-                "'y' to log prompt copY paste",  # implemented
-                "'u' to log copy past prompt unchanged Until submission",  # implemented
-                "'o' to add cOmment",  # implemented
-                "'q' to Quit",  # implemented
-            ]
-        )
-        print(key_hint)
+        curses.wrapper(self.display_key_hint)
 
         running = True
 
@@ -191,7 +185,9 @@ class VLCController:
             nonlocal running
             while running:
                 try:
-                    key = self.getch().lower()
+                    key = curses.wrapper(self.get_single_key)
+                    if key is None:
+                        continue  # Skip if no valid key was pressed
                     if key == "c":
                         self.pause()
                         current_time = self.get_time()
@@ -210,23 +206,28 @@ class VLCController:
                                 f.write(
                                     f"{json.dumps({'timestamp': current_time, 'file_name': file_name, 'components': components})}\n"
                                 )
-
-                        self.play()
-                        print(key_hint)
                     elif key == "y":
                         self.pause()
                         current_time = self.get_time()
                         print(f"Paused at {current_time}")
 
                         confirm = (
-                            input("Confirm prompt was copy pasted? (y/n): ")
+                            curses.wrapper(
+                                lambda stdscr: self.get_curses_input(
+                                    stdscr, "Confirm prompt was copy pasted? (y/n): "
+                                )
+                            )
                             .strip()
                             .lower()
                         )
+                        if confirm is None:
+                            print("Exiting...")
+                            running = False
+                            break
                         if confirm != "y":
                             print("Cancelled writing timestamp.")
                             self.play()
-                            print(key_hint)
+                            curses.wrapper(self.display_key_hint)
                             continue
 
                         # Record the timestamp and comment to a file
@@ -234,17 +235,17 @@ class VLCController:
                             f.write(
                                 f"{json.dumps({'timestamp': current_time, 'file_name': file_name, 'is_copy_pasted': True})}\n"
                             )
-
-                        self.play()
-                        print(key_hint)
                     elif key == "u":
                         self.pause()
                         current_time = self.get_time()
                         print(f"Paused at {current_time}")
 
                         confirm = (
-                            input(
-                                "Confirm copy pasted prompt was not changed until submission? (y/n): "
+                            curses.wrapper(
+                                lambda stdscr: self.get_curses_input(
+                                    stdscr,
+                                    "Confirm copy pasted prompt was not changed until submission? (y/n): ",
+                                )
                             )
                             .strip()
                             .lower()
@@ -252,7 +253,7 @@ class VLCController:
                         if confirm != "y":
                             print("Cancelled writing timestamp.")
                             self.play()
-                            print(key_hint)
+                            curses.wrapper(self.display_key_hint)
                             continue
 
                         # Record the timestamp and comment to a file
@@ -260,16 +261,17 @@ class VLCController:
                             f.write(
                                 f"{json.dumps({'timestamp': current_time, 'file_name': file_name, 'is_copy_pasted_and_unchanged': True})}\n"
                             )
-
-                        self.play()
-                        print(key_hint)
                     elif key == "o":
                         self.pause()
                         current_time = self.get_time()
                         print(f"Paused at {current_time}")
 
                         # Use curses to display comments and get user selection
-                        comment = input("Enter your comment: ")
+                        comment = curses.wrapper(
+                            lambda stdscr: self.get_curses_input(
+                                stdscr, "Enter your comment: "
+                            )
+                        )
                         if comment is None:
                             print("Exiting...")
                             running = False
@@ -281,12 +283,27 @@ class VLCController:
                                 f"{json.dumps({'timestamp': current_time, 'file_name': file_name, 'comment': comment})}\n"
                             )
 
-                        self.play()
-                        print(key_hint)
+                    elif key == "t":
+                        self.pause()
+                        current_time = self.get_time()
+                        action, task = curses.wrapper(self.log_task)
+                        if task is None:
+                            print("Exiting...")
+                            running = False
+                            break
+
+                        # Record the timestamp and comment to a file
+                        with open(self.output_name, "a", encoding="utf-8") as f:
+                            f.write(
+                                f"{json.dumps({'timestamp': current_time, 'file_name': file_name, 'action': action, 'task': task})}\n"
+                            )
+
                     elif key == "q":
                         print("Exiting...")
                         running = False
                         break
+                    self.play()
+                    curses.wrapper(self.display_key_hint)
                 except (EOFError, KeyboardInterrupt):
                     running = False
                     break
@@ -298,8 +315,124 @@ class VLCController:
         # Wait for the input thread to finish
         input_worker.join()
 
+    def log_task(self, stdscr):
+        line_cursor = 0
+        curses.curs_set(0)  # Hide the cursor
+        stdscr.clear()
+
+        # Step 1: Ask for start or end
+        stdscr.addstr(
+            line_cursor,
+            0,
+            "Log Task: Start or End? (press '1' for Start, '2' for End):",
+        )
+        line_cursor += 2
+        stdscr.refresh()
+
+        while True:
+            key = stdscr.getch()
+            if key == ord("1"):
+                action = "start"
+                break
+            elif key == ord("2"):
+                action = "end"
+                break
+
+        # Step 2: Ask for task number
+        stdscr.clear()
+        stdscr.addstr(line_cursor, 0, "Select a task (press the corresponding number):")
+        line_cursor += 1
+
+        tasks = [
+            "Task 1 (CALCULATOR_2)",
+            "Task 2 (MAPLE_RECURSIVE_ABSOLUTE_2)",
+            "Task 3 (LINKED_LIST_MAKE_AFTER_1)",
+            "Task 4 (LINKED_STACK_MAKE_COMBINED)",
+            "Task 5 (PRIME_CHECK_8)",
+            "Task 6 (QS_QUEUE_49)",
+            "Task 7 (ARRAY_FORCE_TO_EMPTY_1)",
+            "Task 8 (TIME_1)",
+            "Task 9 (FIND_FIRST_IN_SORTED_1)",
+            "Task 10 (FIND_IN_SORTED_6) (Press 0 to select)",
+        ]
+        for idx, task in enumerate(tasks):
+            curses.init_pair(idx + 1, curses.COLOR_GREEN, curses.COLOR_BLACK)
+            stdscr.addstr(
+                line_cursor, 0, f"{idx + 1}. {task}", curses.color_pair(idx + 1)
+            )
+            line_cursor += 1
+
+        stdscr.addstr(line_cursor, 0, "Press Enter to confirm selection.")
+        line_cursor += 2
+        stdscr.refresh()
+
+        selected_task = None
+        while True:
+            key = stdscr.getch()
+            if key in range(ord("0"), ord("0") + len(tasks)):
+                if key == ord("0"):
+                    selected_task = tasks[-1]  # Task 10
+                else:
+                    selected_task = tasks[key - ord("1")]
+                break
+
+        # Log the action and task
+        stdscr.clear()
+        stdscr.addstr(0, 0, f"Logged {action} for {selected_task}")
+        stdscr.refresh()
+        return action, selected_task
+
     def quit_vlc(self):
         self.send_command("quit")  # Quit VLC when done
+
+    def get_curses_input(self, stdscr, prompt):
+        curses.curs_set(1)  # Show the cursor
+        stdscr.clear()
+        stdscr.addstr(0, 0, prompt)
+        stdscr.refresh()
+
+        input_str = ""
+        while True:
+            key = stdscr.getch()
+            if key in (curses.KEY_ENTER, 10, 13):  # Enter key
+                break
+            elif key in (curses.KEY_BACKSPACE, 127):  # Backspace key
+                input_str = input_str[:-1]
+                stdscr.clear()
+                stdscr.addstr(0, 0, prompt + input_str)
+                stdscr.refresh()
+            elif 32 <= key <= 126:  # Printable characters
+                input_str += chr(key)
+                stdscr.addstr(0, 0, prompt + input_str)
+                stdscr.refresh()
+
+        curses.curs_set(0)  # Hide the cursor
+        return input_str
+
+    def display_key_hint(self, stdscr):
+        stdscr.clear()
+        key_hint = [
+            "'t' to log task start or end",
+            "'c' to log prompt Components and Categories",
+            "'y' to log prompt copY paste",
+            "'u' to log copy past prompt unchanged Until submission",
+            "'o' to add cOmment",
+            "'q' to Quit",
+        ]
+        stdscr.addstr(0, 0, "Press:")
+        for idx, hint in enumerate(key_hint, start=1):
+            stdscr.addstr(idx, 2, f"- {hint}")
+        stdscr.refresh()
+        # stdscr.getch()  # Wait for user to press a key before continuing
+
+    def get_single_key(self, stdscr):
+        """Get a single key press using curses"""
+        # curses.curs_set(0)  # Hide cursor
+        # stdscr.clear()
+        # stdscr.addstr(0, 0, "Waiting for key press...")
+        # stdscr.refresh()
+        key = stdscr.getch()
+        return chr(key).lower() if 32 <= key <= 126 else None
 
 
 def main(output_name, video_paths):
@@ -325,4 +458,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
     _, output, *videos = sys.argv
+    # Clear the terminal at the start
+    print("\033c", end="")
     main(output, videos)
