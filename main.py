@@ -44,6 +44,10 @@ class VLCController:
                 "ask the model to automatically explain the rationale behind given answers to the user. Users can gain a better understanding of how the model is processing the input, what assumptions it is making, and what data it is drawing on.",
                 curses.COLOR_GREEN,
             ],
+            "Category: Masking": [
+                "Use token masking to let the model fill in the fixed part.",
+                curses.COLOR_YELLOW,
+            ],
         }
 
     def getch(self):
@@ -152,9 +156,13 @@ class VLCController:
         stdscr.refresh()
         while True:
             key = stdscr.getch()
-            if key in range(ord("1"), ord("1") + len(self.components)):
+            if key in range(ord("0"), ord("0") + len(self.components)):
                 # Get the corresponding component key from the dictionary
-                component_key = list(self.components.keys())[key - ord("1")]
+                if key == ord("0"):
+                    index = -1  # Task 10
+                else:
+                    index = key - ord("1")
+                component_key = list(self.components.keys())[index]
                 if component_key in selected_comments:
                     selected_comments.remove(component_key)
                 else:
