@@ -14,9 +14,9 @@ class VLCController:
         self.process = None
 
         self.components = {
-            "natural language": ["Prompt contains natural language", curses.COLOR_CYAN],
-            "source code": ["Prompt contains sourcs code", curses.COLOR_GREEN],
-            "tool output": [
+            "Natural language": ["Prompt contains natural language", curses.COLOR_CYAN],
+            "Source code": ["Prompt contains sourcs code", curses.COLOR_GREEN],
+            "Tool output": [
                 "Prompt contains output from the tool (e.g. counter-examples or compiler output)",
                 curses.COLOR_YELLOW,
             ],
@@ -425,10 +425,6 @@ class VLCController:
 
     def get_single_key(self, stdscr):
         """Get a single key press using curses"""
-        # curses.curs_set(0)  # Hide cursor
-        # stdscr.clear()
-        # stdscr.addstr(0, 0, "Waiting for key press...")
-        # stdscr.refresh()
         key = stdscr.getch()
         return chr(key).lower() if 32 <= key <= 126 else None
 
